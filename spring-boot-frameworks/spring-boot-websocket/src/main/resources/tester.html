@@ -1,0 +1,165 @@
+<html lang="en">
+<head>
+    <title>Chat WebSocket</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.4.0/sockjs.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.js"></script>
+    <script type="text/javascript">
+        let stompClient = null;
+        let baseAddress = 'http://localhost:8080';
+        let senderName;
+        let senderId;
+
+        function setConnected(connected) {
+            document.getElementById('connect').disabled = connected;
+            document.getElementById('disconnect').disabled = !connected;
+            document.getElementById('conversationDiv').style.visibility = connected ? 'visible' : 'hidden';
+            document.getElementById('onlineDiv').style.visibility = connected ? 'visible' : 'hidden';
+            document.getElementById('users').style.visibility = connected ? 'visible' : 'hidden';
+            document.getElementById('response').innerHTML = '';
+        }
+
+        function connect() {
+            const socket = new SockJS(baseAddress + '/chat');
+            stompClient = Stomp.over(socket);
+            senderId = document.getElementById('senderId').value;
+            senderName = document.getElementById('senderName').value;
+
+            stompClient.connect({"senderId": senderId,
+                "senderName": senderName}, function() {
+                setConnected(true);
+
+                stompClient.subscribe("/topic/onlineUsers", function (message) {
+                    const onlineUsers = JSON.parse(message.body);
+                    updateOnlineUsers(onlineUsers);
+                });
+
+
+                // Request the current list of online users
+                stompClient.send("/app/getUsers", {}, {});
+
+                stompClient.subscribe('/topic/'+senderName+'/messages', function (message) {
+
+                    handleReceivedMessage(JSON.parse(message.body));
+                });
+
+            });
+        }
+        function updateOnlineUsers(users) {
+            const onlineUsersDiv = document.getElementById('onlineUsers');
+            onlineUsersDiv.innerHTML = '';
+
+            users.forEach(function (user) {
+                if (user.id !== senderId) {
+                    const p = document.createElement('p');
+                    p.style.wordWrap = 'break-word';
+                    p.textContent = user.name + " (ID: " + user.id + ") is online.";
+                    onlineUsersDiv.appendChild(p);
+                }
+            });
+
+            // Update the select dropdown with available users
+            updateUsers(users);
+        }
+
+        function disconnect() {
+            if (stompClient != null) {
+                const senderId = document.getElementById('senderId').value;
+                console.log("Sending disconnect message for senderId:" + senderId);
+
+                stompClient.send("/app/disconnect/" + senderId, {}, JSON.stringify({'senderId': senderId}));
+                stompClient.disconnect();
+
+            }
+            setConnected(false);
+        }
+
+
+        function sendMessage() {
+            const selectElement = document.getElementById('users');
+            const selectedOption = selectElement.options[selectElement.selectedIndex];
+
+            // Check if selectedOption is defined and has textContent
+            if (!selectedOption || !selectedOption.textContent.trim()) {
+                alert("Please select a valid user to send a message.");
+                return;
+            }
+
+            const selectedUserName = selectedOption.textContent;
+            const receiverId = selectElement.value;
+            const content = document.getElementById('text').value;
+
+            // Check if message content is empty
+            if (!content.trim() || content.trim() === "") {
+                alert("Please enter a message to send.");
+                return;
+            }
+
+            stompClient.send("/app/chat", {},
+                JSON.stringify({
+                    'senderId': senderId,
+                    'senderName': senderName,
+                    'receiverId': receiverId,
+                    'content': content,
+                    'receiverName': selectedUserName
+                }));
+
+            handleReceivedMessage({'senderName': senderName, 'content': content});
+        }
+
+
+        function handleReceivedMessage(message) {
+            const response = document.getElementById('response');
+            const p = document.createElement('p');
+            p.style.wordWrap = 'break-word';
+            p.appendChild(document.createTextNode(message.senderName + ": " + message.content));
+            response.appendChild(p);
+            document.getElementById('text').value = "";
+        }
+
+
+        function updateUsers(users) {
+            console.log("USERS:"+users)
+            const usersSelect = document.getElementById('users');
+            usersSelect.innerHTML = '';
+            users.forEach(function (user) {
+                if(user.id !== senderId) {
+
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.text = user.name;
+                    usersSelect.appendChild(option);
+                }
+            });
+        }
+    </script>
+</head>
+<body onload="disconnect()">
+        <div>
+            <div>
+                <label for="senderId"></label><input type="text" id="senderId" placeholder="User id"/>
+                <label for="senderName"></label><input type="text" id="senderName" placeholder="Username"/>
+            </div>
+            <br/>
+            <div>
+                <button id="connect" onclick="connect();">connect</button>
+                <button id="disconnect" disabled="disabled" onclick="disconnect();">logout</button>
+            </div>
+            <br/>
+            <div>
+                <label for="users"></label><select name="users" id="users" style="visibility: hidden"  >
+
+                </select>
+            </div>
+            <br/>
+            <div id="onlineDiv" style="visibility: hidden;">
+
+                <p id="onlineUsers"></p>
+            </div>
+            <div id="conversationDiv" style="visibility: hidden;">
+                <label for="text"></label><input type="text" id="text" placeholder="Message.."/>
+                <button id="sendMessage" onclick="sendMessage();">send</button>
+                <p id="response"></p>
+            </div>
+        </div>
+</body>
+</html>
